@@ -164,4 +164,8 @@ cython_debug/
 
 # Ignore dataset folder
 Cows-uav
-dataset
+sliced_dataset
+yolo_sliced_dataset
+
+# Log folder
+runs
