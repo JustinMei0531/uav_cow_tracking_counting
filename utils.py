@@ -1,16 +1,8 @@
-# 1. 把yolov5格式转换成coco格式标签；
-# 2. 切片图片和coco标签；
-# 3. 把切片出来的coco标签转换回yolov5标签格式
-
 import os
-import numpy as np
-import cv2
-from sahi.utils.coco import Coco, CocoCategory, CocoImage, CocoAnnotation
-from sahi.slicing import slice_coco
-from sahi.utils.file import save_json
-from tqdm import tqdm
-import random
 import json
+import cv2
+import random
+from tqdm import tqdm
 
 
 def convert_annotation_format(json_file, output_path, image_width, image_height):
@@ -18,8 +10,6 @@ def convert_annotation_format(json_file, output_path, image_width, image_height)
         data = json.load(f)
 
     yolo_labels = []
-
-    # Read json file
     
     for shape in data['shapes']:
         label = shape['label']
@@ -114,149 +104,77 @@ def process_dataset(input_folder, output_folder, validation_ratio=0.1):
             f.write(yaml_content)
 
 
-
-
-def convert2coco(img_path,h,w,yololabel):
-
-    coco = Coco()
-    maps = {
-        0 : "cow"
-    }
-    coco.add_category(CocoCategory(id=0, name='cow')) # 两个类别
-
-    coco_image = CocoImage(file_name=img_path, height=h, width=w)
-    
-    for label in yololabel:
-
-        coco_image.add_annotation(
-        CocoAnnotation(
-            bbox=[label[1], label[2], label[3], label[4]],
-            category_id=int(label[0]),
-            category_name=maps[label[0]]
-        )
-        )
-    
-    coco.add_image(coco_image)
-    coco_json = coco.json
-    save_json(coco_json, "coco_dataset.json")
-    return coco_json
-
-def convert2xywh(l, h, w):
+def slice_image(image_path, slice_width=800, slice_height=600, overlap=0):
     """
-    Converts YOLO format (class_id, x_center, y_center, width, height) to
-    (class_id, top_left_x, top_left_y, width, height).
-    
+    Slice a large image into smaller patches and save them in the same directory with a modified name.
+
     Args:
-        l (numpy.ndarray): Array of YOLO labels (class_id, x_center, y_center, width, height).
-        h (int): Image height.
-        w (int): Image width.
-    
-    Returns:
-        numpy.ndarray: Converted labels in the format (class_id, top_left_x, top_left_y, width, height).
+        image_path (str): Path to the large image file.
+        slice_width (int): Width of each slice.
+        slice_height (int): Height of each slice.
+        overlap (int): Number of pixels to overlap between slices.
     """
-    # Ensure `l` is at least a 2D array
-    if len(l.shape) == 1:
-        l = l.reshape(-1, 5)  # Reshape to (1, 5) if it's a single row
+    # Get the directory and file name from the image path
+    image_dir, image_filename = os.path.split(image_path)
+    base_filename, file_ext = os.path.splitext(image_filename)
 
-    # Handle empty arrays
-    if l.shape[0] == 0:
-        return np.array([])
+    # Read the large image
+    img = cv2.imread(image_path)
+    img_height, img_width, _ = img.shape
 
-    # Create a new array to store converted labels
-    new_l = np.zeros_like(l)
+    # Slice the image into smaller patches
+    patch_id = 0
+    for y in range(0, img_height, slice_height - overlap):
+        for x in range(0, img_width, slice_width - overlap):
+            # Calculate the dimensions of the patch
+            x_end = min(x + slice_width, img_width)
+            y_end = min(y + slice_height, img_height)
+            patch = img[y:y_end, x:x_end]
 
-    # Convert YOLO format to top-left corner based bounding box (left_x, top_y, width, height)
-    l[:, 1] = l[:, 1] * w  # x_center * image width
-    l[:, 3] = l[:, 3] * w  # width * image width
-    l[:, 2] = l[:, 2] * h  # y_center * image height
-    l[:, 4] = l[:, 4] * h  # height * image height
+            # Name the patch based on the original filename and coordinates
+            patch_filename = f"{base_filename}_patch_{x}_{y}{file_ext}"
+            patch_path = os.path.join(image_dir, patch_filename)
+            cv2.imwrite(patch_path, patch)
 
-    # Assign converted values to the new array
-    new_l[:, 0] = l[:, 0]  # class_id
-    new_l[:, 1] = l[:, 1] - l[:, 3] / 2  # top-left x = x_center - (width / 2)
-    new_l[:, 2] = l[:, 2] - l[:, 4] / 2  # top-left y = y_center - (height / 2)
-    new_l[:, 3] = l[:, 3]  # width
-    new_l[:, 4] = l[:, 4]  # height
+            print(f"Saved: {patch_path}")
+            patch_id += 1
 
-    return new_l
+    print(f"Total {patch_id} patches saved in {image_dir}.")
 
-def slice_img(save_img_dir):
-    
-    coco_dict, coco_path = slice_coco(
-                coco_annotation_file_path="coco_dataset.json",
-                image_dir='',
-                slice_height=640,
-                slice_width=640,
-                overlap_height_ratio=0.2,
-                overlap_width_ratio=0.2,
-                output_dir = save_img_dir,
-                output_coco_annotation_file_name = 'sliced',
-                min_area_ratio = 0.2,
-                ignore_negative_samples = True
-            )
-    return  
-
-def convert2yolov5(coco_dir, save_img_dir, save_label_dir):
+def slice_multiple_images(input_dir, slice_width=800, slice_height=600, overlap=0):
     """
-    Converts the sliced COCO annotations back to YOLO format.
-    
+    Slice multiple large images in a directory into smaller patches and save them in the same directory.
+
     Args:
-        coco_dir (str): Path to the sliced COCO annotations file.
-        save_img_dir (str): Path to the directory containing the sliced images.
-        save_label_dir (str): Directory where YOLO labels will be saved.
+        input_dir (str): Directory containing the large images.
+        slice_width (int): Width of each slice (default: 800).
+        slice_height (int): Height of each slice (default: 600).
+        overlap (int): Number of pixels to overlap between slices (default: 0).
     """
-    # Load COCO object
-    coco = Coco.from_coco_dict_or_path(coco_dir, save_img_dir)
-    
-    # Validate image paths before exporting
-    for coco_image in coco.images:
-        coco_image_path = coco_image.file_name
-        full_image_path = os.path.join(save_img_dir, coco_image_path)
-        if not os.path.exists(full_image_path):
-            print(f"Warning: File not found -> {full_image_path}")
-    
-    # Export YOLOv5 formatted dataset
-    coco.export_as_yolov5(
-        output_dir=save_label_dir,
-        disable_symlink=True
-    )
+    # Iterate over all image files in the input directory
+    for image_filename in os.listdir(input_dir):
+        if image_filename.lower().endswith(('.png', '.jpg', '.jpeg')):
+            image_path = os.path.join(input_dir, image_filename)
 
-if __name__ == '__main__':
-    img_dir = f'dataset/images/train/'
-    anno_dir = f'dataset/labels/train/'
-    save_img_dir = 'dataset/sliced_images/' 
-    save_label_dir = 'dataset/sliced_labels/'
-    os.makedirs(save_img_dir,exist_ok=True)
-    os.makedirs(save_label_dir,exist_ok=True)
-    labels = os.listdir(anno_dir)
-    for label in labels:
-        if 'old' not in label:
-            try:
-                os.remove('coco_dataset.json') # 删除中间文件
-                os.remove(save_img_dir+'sliced_coco.json')
-            except:
-                pass
-            l = np.loadtxt(anno_dir+label,delimiter=' ') # class cx xy w h
-            img_path = img_dir+label.replace('txt','jpg')
-            img = cv2.imread(img_path)
-            h,w,_ = img.shape
-            new_l = convert2xywh(l,h,w)
-            coco_json = convert2coco(img_path,h,w,new_l)
-            slice_img(save_img_dir)  # 切分图片并保存
-            convert2yolov5(save_img_dir+'sliced_coco.json', save_img_dir, save_label_dir) # 把切分完的coco标签转换回yolo格式并保存
-            
-# if __name__ == "__main__":
-#     # input_folder = "./Cows-uav/Flight 1"
-#     output_folder = './dataset'
+            print(f"Processing image: {image_filename}")
+            # Slice the image into patches
+            slice_image(image_path, slice_width, slice_height, overlap)
 
-#     # List all images folders
 
-#     input_folders = os.listdir("./Cows-uav")
+if __name__ == "__main__":
+
+    # input_folder = "./Cows-uav/Flight 1"
+    output_folder = './dataset'
+
+    # List all images folders
+
+    input_folders = os.listdir("./Cows-uav")
     
-#     for input_folder in input_folders:
-#         input_folder = os.path.join("./Cows-uav", input_folder)
-#         print("Processing folder {}".format(input_folder))
-#         process_dataset(input_folder, output_folder, 0.1)
+    for input_folder in input_folders:
+        input_folder = os.path.join("./Cows-uav", input_folder)
+        print("Processing folder {}".format(input_folder))
+        process_dataset(input_folder, output_folder, 0.1)
 
-    
-            
+    # images_folder = "./Cows-uav/Flight 2"
+
+    # slice_multiple_images(images_folder)
