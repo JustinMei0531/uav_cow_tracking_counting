@@ -166,6 +166,7 @@ cython_debug/
 Cows-uav
 sliced_dataset
 yolo_sliced_dataset
+dataset
 
 # Log folder
 runs
