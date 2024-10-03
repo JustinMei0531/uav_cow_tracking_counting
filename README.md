@@ -82,3 +82,7 @@ When the drone rotates quickly or switches perspective, the target being tracked
 
    <br>
    
+
+## Final effect display
+
+![display_video](./images/YOLO%20+%20ByteTrack%20Real-Time%20Object%20Tracking%202024-10-03%2015-22-11.mp4)
